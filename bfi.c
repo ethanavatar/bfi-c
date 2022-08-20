@@ -12,37 +12,49 @@
 
 #define READ_MAX_LEN (1 << 20)
 
-char* readfile(FILE *f) {
+#define READFILE_OK 0
+#define READFILE_FSEEK_ERROR 1
+#define READFILE_MAXLEN_ERROR 2
+#define READFILE_MALLOC_ERROR 3
+#define READFILE_FREAD_ERROR 4
+
+typedef struct cStrResult cStrResult;
+struct cStrResult {
+    char *str;
+    errno_t errno_code;
+};
+
+cStrResult readfile(FILE *f) {
+    
     if (f == NULL || fseek(f, 0, SEEK_END)) {
-        return NULL;
+        return (cStrResult) {NULL, READFILE_FSEEK_ERROR};
     }
     long length = ftell(f);
     rewind(f);
 
     if (length == -1 || (unsigned long) length >= READ_MAX_LEN) {
-        return NULL;
+        return (cStrResult) {NULL, READFILE_MAXLEN_ERROR};
     }
     size_t ulength = (size_t) length;
     char *buffer = (char*) malloc(ulength + sizeof(char));
     buffer[ulength] = '\0';
 
     if (buffer == NULL) {
-        return NULL;
+        return (cStrResult) {NULL, READFILE_MALLOC_ERROR};
     }
     size_t readlen = fread(buffer, sizeof(char), ulength, f);
 
     if (readlen != ulength) {
         free(buffer);
-        return NULL;
+        return (cStrResult) {NULL, READFILE_FREAD_ERROR};
     }
-
-    return buffer;
+    return (cStrResult) {buffer, READFILE_OK};
 }
 
 #define BF_TAPE_SIZE 30000
 static char BF_TAPE[BF_TAPE_SIZE] = {0};
 
-#define BF_SUCCESS 0
+#define BF_OK 0
 #define BF_ERROR_OVERFLOW 1
 #define BF_ERROR_UNDERFLOW 2
 #define BF_ERROR_UNBALANCED_BRACKETS 3
@@ -114,13 +126,13 @@ int run_program(char *program) {
                     if (program[pc] == ']')      bracket_depth++;
                     else if (program[pc] == '[') bracket_depth--;
                 }
-                
+                break;
             default:
                 pc++;
                 break;
         }
     }
-    return BF_SUCCESS;
+    return BF_OK;
 }
 
 int main(int argc, char *argv[]) {
@@ -136,7 +148,25 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: Reading file '%s'\n", filename);
         exit(EXIT_FAILURE);
     }
-    char *program = readfile(fp);
+    cStrResult readResult = readfile(fp);
+    char *program = NULL;
+    switch (readResult.errno_code) {
+        case READFILE_OK:
+            program = readResult.str;
+            break;
+        case READFILE_FSEEK_ERROR:
+            fprintf(stderr, "READFILE_FSEEK_ERROR\n");
+            exit(EXIT_FAILURE);
+        case READFILE_MAXLEN_ERROR:
+            fprintf(stderr, "READFILE_MAXLEN_ERROR\n");
+            exit(EXIT_FAILURE);
+        case READFILE_MALLOC_ERROR:
+            fprintf(stderr, "READFILE_MALLOC_ERROR\n");
+            exit(EXIT_FAILURE);
+        case READFILE_FREAD_ERROR:
+            fprintf(stderr, "READFILE_FREAD_ERROR\n");
+            exit(EXIT_FAILURE);
+    }
     fclose(fp);
 
     if (program == NULL) {
@@ -144,27 +174,21 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
     errno_t ret = run_program(program);
-    errno_t exit_code = EXIT_SUCCESS;
     switch (ret) {
-        case BF_SUCCESS:
+        case BF_OK:
             break;
         case BF_ERROR_OVERFLOW:
-            fprintf(stderr, "Error: Overflow\n");
-            break;
+            fprintf(stderr, "BF_ERROR_OVERFLOW\n");
+            exit(EXIT_FAILURE);
         case BF_ERROR_UNDERFLOW:
-            fprintf(stderr, "Error: Underflow\n");
-            break;
+            fprintf(stderr, "BF_ERROR_UNDERFLOW\n");
+            exit(EXIT_FAILURE);
         case BF_ERROR_UNBALANCED_BRACKETS:
-            fprintf(stderr, "Error: Unbalanced brackets\n");
-            break;
+            fprintf(stderr, "BF_ERROR_UNBALANCED_BRACKETS\n");
+            exit(EXIT_FAILURE);
         default:
             fprintf(stderr, "Error: Unknown error\n");
-            break;
+            exit(EXIT_FAILURE);
     }
-
-    if (ret != BF_SUCCESS) {
-        exit_code = EXIT_FAILURE;
-    }
-
-    exit(exit_code);
+    exit(EXIT_SUCCESS);
 }
